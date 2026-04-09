@@ -4,6 +4,7 @@ import { formatTanggal, JENIS_ACARA_LABEL } from "@/lib/utils";
 import TambahAcaraForm from "@/components/forms/TambahAcaraForm";
 import type { Acara } from "@/types";
 
+export const revalidate = 0;
 
 export default async function HomePage() {
   let acaraList: Acara[] = [];
