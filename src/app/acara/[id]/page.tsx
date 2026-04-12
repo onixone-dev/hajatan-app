@@ -1,37 +1,41 @@
-import { notFound } from "next/navigation";
-import { getAcaraById, getSumbanganByAcara, getStatistikAcara } from "@/lib/queries";
-import DetailAcaraClient from "./DetailAcaraClient";
+import { notFound, redirect } from "next/navigation";
+import { getAcaraById } from "@/lib/queries";
+import { getSession } from "@/lib/auth";
+import { bolehAkses } from "@/lib/auth";
+import { FITUR_LIST } from "@/lib/session";
+import DashboardAcaraClient from "./DashboardAcaraClient";
 
-// Next.js 15: params adalah Promise — harus di-await
 interface Props {
   params: Promise<{ id: string }>;
 }
 
-// Server Component: fetch data awal, lalu serahkan ke Client Component
-export default async function DetailAcaraPage({ params }: Props) {
+export const revalidate = 0;
+
+export default async function AcaraPage({ params }: Props) {
   const { id } = await params;
 
-  try {
-    const acara = await getAcaraById(id);
-    if (!acara) return notFound();
+  const session = await getSession();
+  if (!session) redirect("/login");
 
-    const [sumbanganAwal, statistikAwal] = await Promise.all([
-      getSumbanganByAcara(id),
-      getStatistikAcara(id),
-    ]);
+  const acara = await getAcaraById(id);
+  if (!acara) return notFound();
 
-    return (
-      <DetailAcaraClient
-        acara={acara}
-        sumbanganAwal={sumbanganAwal}
-        statistikAwal={statistikAwal}
-      />
-    );
-  } catch {
-    return (
-      <div className="card text-center py-10 text-red-500">
-        ⚠️ Gagal memuat data acara. Coba refresh halaman.
-      </div>
-    );
+  // Panitia hanya bisa akses acara yang ditugaskan
+  if (session.role === "panitia" && session.acara_id !== id) {
+    redirect("/");
   }
+
+  // Filter fitur yang boleh diakses
+  const fiturTersedia = FITUR_LIST.filter((f) =>
+    bolehAkses(session, f.id)
+  );
+
+  return (
+    <DashboardAcaraClient
+      acara={acara}
+      fiturTersedia={fiturTersedia}
+      role={session.role}
+      panitia_nama={session.panitia_nama}
+    />
+  );
 }
