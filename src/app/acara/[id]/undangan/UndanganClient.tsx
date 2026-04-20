@@ -21,6 +21,12 @@ interface Props {
   undanganAwal: Undangan[];
 }
 
+const DESA_TUAH_NEGERI = [
+  "Air Beliti", "Bamasco", "Banpres", "Darma Sakti",
+  "Jaya Bhakti", "Jaya Tunggal", "Leban Jaya", "Lubuk Rumbai",
+  "Petunang", "Remayu", "Sukamulya",
+];
+
 const STATUS_LABEL: Record<string, { label: string; warna: string; icon: string }> = {
   hadir:       { label: "Hadir",       warna: "bg-green-100 text-green-700 border-green-300", icon: "✅" },
   tidak_hadir: { label: "Tidak Hadir", warna: "bg-red-100   text-red-700   border-red-300",   icon: "❌" },
@@ -34,65 +40,70 @@ export default function UndanganClient({ acara, undanganAwal }: Props) {
   const [sukses, setSukses] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [menghapus, setMenghapus] = useState<string | null>(null);
+  const [suksesEdit, setSuksesEdit] = useState("");
   const [edit, setEdit] = useState<Partial<Undangan>>({});
+
+  // State autocomplete form tambah
+  const [nilaiAlamat, setNilaiAlamat] = useState("");
+  const [suggestionDesa, setSuggestionDesa] = useState<string[]>([]);
+
+  // State autocomplete form edit
+  const [suggestionDesaEdit, setSuggestionDesaEdit] = useState<string[]>([]);
 
   // ── Statistik ──
   const totalHadir      = list.filter((u) => u.status === "hadir").length;
   const totalTidakHadir = list.filter((u) => u.status === "tidak_hadir").length;
   const totalBelum      = list.filter((u) => u.status === "belum").length;
 
-  // Otomatis ubah status "belum" → "tidak_hadir" setelah jam 18:00
-// di tanggal acara
-useEffect(() => {
-  async function cekPenutupan() {
-    const sekarang = new Date();
-    const tanggalAcara = new Date(acara.tanggal);
+  // ── Auto update status belum → tidak_hadir setelah jam 18 ──
+  useEffect(() => {
+    async function cekPenutupan() {
+      const sekarang = new Date();
+      const tanggalAcara = new Date(acara.tanggal);
 
-    // Samakan tanggal (tanpa jam)
-    const hariIni = new Date(
-      sekarang.getFullYear(),
-      sekarang.getMonth(),
-      sekarang.getDate()
+      const hariIni = new Date(sekarang.getFullYear(), sekarang.getMonth(), sekarang.getDate());
+      const hariAcara = new Date(tanggalAcara.getFullYear(), tanggalAcara.getMonth(), tanggalAcara.getDate());
+
+      const sudahJam18 = sekarang.getHours() >= 18;
+      const hariSama = hariIni.getTime() === hariAcara.getTime();
+
+      if (!hariSama || !sudahJam18) return;
+
+      const yangBelum = list.filter((u) => u.status === "belum");
+      if (yangBelum.length === 0) return;
+
+      const ids = yangBelum.map((u) => u.id);
+      const { error } = await supabase
+        .from("undangan").update({ status: "tidak_hadir" }).in("id", ids);
+
+      if (error) { console.error("Gagal auto-update:", error); return; }
+
+      setList((prev) =>
+        prev.map((u) => u.status === "belum" ? { ...u, status: "tidak_hadir" } : u)
+      );
+    }
+
+    cekPenutupan();
+    const interval = setInterval(cekPenutupan, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [acara.tanggal, list]);
+
+  // ── Helper autocomplete ──
+  function filterDesa(teks: string): string[] {
+    if (teks.trim() === "") return [];
+    const kata = teks.toLowerCase().split(/[\s,]+/).filter(Boolean);
+    return DESA_TUAH_NEGERI.filter((desa) =>
+      kata.some((k) => desa.toLowerCase().includes(k))
     );
-    const hariAcara = new Date(
-      tanggalAcara.getFullYear(),
-      tanggalAcara.getMonth(),
-      tanggalAcara.getDate()
-    );
-
-    const sudahJam18 = sekarang.getHours() >= 18;
-    const hariSama = hariIni.getTime() === hariAcara.getTime();
-
-    // Hanya jalankan kalau hari acara dan sudah lewat jam 18
-    if (!hariSama || !sudahJam18) return;
-
-    // Ambil semua yang masih "belum"
-    const yangBelum = list.filter((u) => u.status === "belum");
-    if (yangBelum.length === 0) return;
-
-    // Update ke Supabase sekaligus
-    const ids = yangBelum.map((u) => u.id);
-    const { error } = await supabase
-      .from("undangan")
-      .update({ status: "tidak_hadir" })
-      .in("id", ids);
-
-    if (error) { console.error("Gagal auto-update status:", error); return; }
-
-    // Update state lokal
-    setList((prev) =>
-      prev.map((u) => u.status === "belum" ? { ...u, status: "tidak_hadir" } : u)
-    );
-
-    console.log(`${yangBelum.length} undangan otomatis diubah ke Tidak Hadir.`);
   }
 
-  cekPenutupan();
-
-  // Cek ulang setiap 1 menit — antisipasi halaman dibuka sebelum jam 18
-  const interval = setInterval(cekPenutupan, 60 * 1000);
-  return () => clearInterval(interval);
-}, [acara.tanggal, list]);
+  function terapkanPilihDesa(nilaiSaat: string, desa: string): string {
+    const kataKotor = nilaiSaat
+      .split(/[\s,]+/)
+      .filter((k) => !desa.toLowerCase().includes(k.toLowerCase()) && k.trim() !== "");
+    const prefix = kataKotor.join(" ").trim();
+    return prefix ? `${prefix}, ${desa}` : desa;
+  }
 
   // ── Tambah ──
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -106,9 +117,8 @@ useEffect(() => {
     const payload = {
       acara_id: acara.id,
       nama,
-      alamat:   (data.get("alamat") as string).trim() || null,
-      status:   "belum" as const,
-      catatan:  (data.get("catatan") as string).trim() || null,
+      alamat:  nilaiAlamat.trim() || null,
+      status:  "belum" as const,
     };
 
     try {
@@ -118,6 +128,8 @@ useEffect(() => {
 
       setList([baru, ...list]);
       formEl.reset();
+      setNilaiAlamat("");
+      setSuggestionDesa([]);
       setSukses(`✅ ${nama} berhasil ditambahkan!`);
       setTimeout(() => setSukses(""), 2000);
     } catch (err: any) {
@@ -143,29 +155,52 @@ useEffect(() => {
   function bukaEdit(u: Undangan) {
     setEditId(u.id);
     setEdit({ nama: u.nama, alamat: u.alamat ?? "", catatan: u.catatan ?? "" });
+    setSuggestionDesaEdit([]);
   }
 
   async function handleSimpanEdit(id: string) {
-    if (!edit.nama?.trim()) { alert("Nama tidak boleh kosong."); return; }
-    try {
-      const payloadDB = {
-        nama:    edit.nama.trim(),
-        alamat:  edit.alamat?.trim() || null,
-        catatan: edit.catatan?.trim() || null,
-      };
-      const payloadLokal: Partial<Undangan> = {
-        nama:    edit.nama.trim(),
-        alamat:  edit.alamat?.trim() || undefined,
-        catatan: edit.catatan?.trim() || undefined,
-      };
-      const { error } = await supabase.from("undangan").update(payloadDB).eq("id", id);
-      if (error) throw error;
-      setList((prev) => prev.map((u) => u.id === id ? { ...u, ...payloadLokal } : u));
-      setEditId(null);
-    } catch (err: any) {
-      alert(`Gagal: ${err.message}`);
+  if (!edit.nama?.trim()) { alert("Nama tidak boleh kosong."); return; }
+  try {
+    const undanganLama = list.find((u) => u.id === id);
+
+    const namaBerubah = undanganLama?.nama !== edit.nama?.trim();
+    const alamatBerubah = (undanganLama?.alamat ?? "") !== (edit.alamat?.trim() ?? "");
+    const dataBeruah = namaBerubah || alamatBerubah;
+
+    // Kalau nama atau alamat berubah → reset status ke belum
+    const statusBaru = dataBeruah ? "belum" : undanganLama?.status ?? "belum";
+
+    const payloadDB = {
+      nama:    edit.nama.trim(),
+      alamat:  edit.alamat?.trim() || null,
+      catatan: edit.catatan?.trim() || null,
+      status:  statusBaru,
+    };
+
+    const payloadLokal: Partial<Undangan> = {
+      nama:    edit.nama.trim(),
+      alamat:  edit.alamat?.trim() || undefined,
+      catatan: edit.catatan?.trim() || undefined,
+      status:  statusBaru,
+    };
+
+    const { error } = await supabase.from("undangan").update(payloadDB).eq("id", id);
+    if (error) throw error;
+
+    setList((prev) => prev.map((u) => u.id === id ? { ...u, ...payloadLokal } : u));
+    setEditId(null);
+
+    // Pesan sesuai kondisi
+    if (dataBeruah) {
+      setSuksesEdit(`✅ Data diperbarui! Status ${edit.nama.trim()} direset ke Belum — harap konfirmasi ulang.`);
+    } else {
+      setSuksesEdit(`✅ Catatan ${edit.nama.trim()} berhasil diperbarui!`);
     }
+    setTimeout(() => setSuksesEdit(""), 3000);
+  } catch (err: any) {
+    alert(`Gagal: ${err.message}`);
   }
+}
 
   // ── Hapus ──
   async function handleHapus(id: string, nama: string) {
@@ -207,7 +242,7 @@ useEffect(() => {
         <KartuStatistik label="Belum Konfirmasi" nilai={totalBelum.toString()} ikon="⏳" />
       </div>
 
-      {/* Form tambah */}
+      {/* Form tambah — tanpa field catatan */}
       <section className="card">
         <h3 className="text-xl font-bold text-batik-700 mb-4">✍️ Tambah Undangan</h3>
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -218,19 +253,33 @@ useEffect(() => {
             <input name="nama" required placeholder="Contoh: Pak Budi"
               className="input-field" autoComplete="off" />
           </div>
-          <div>
+
+          {/* Alamat + autocomplete desa */}
+          <div className="relative">
             <label className="block text-base font-semibold text-gray-700 mb-1">
               Alamat <span className="text-gray-400 text-sm font-normal">(opsional)</span>
             </label>
-            <input name="alamat" placeholder="Contoh: Jaya Bhakti"
-              className="input-field" />
-          </div>
-          <div>
-            <label className="block text-base font-semibold text-gray-700 mb-1">
-              Catatan <span className="text-gray-400 text-sm font-normal">(opsional)</span>
-            </label>
-            <input name="catatan" placeholder="Catatan tambahan..."
-              className="input-field" />
+            <input
+              value={nilaiAlamat}
+              onChange={(e) => { setNilaiAlamat(e.target.value); setSuggestionDesa(filterDesa(e.target.value)); }}
+              onBlur={() => setTimeout(() => setSuggestionDesa([]), 150)}
+              placeholder="Contoh: Kp3 Bandung, Jaya Bhakti"
+              autoComplete="off"
+              className="input-field"
+            />
+            {suggestionDesa.length > 0 && (
+              <ul className="absolute z-10 left-0 right-0 bg-white border-2 border-batik-300 rounded-xl shadow-xl mt-1 overflow-hidden">
+                {suggestionDesa.map((desa) => (
+                  <li key={desa}
+                    onMouseDown={() => { setNilaiAlamat(terapkanPilihDesa(nilaiAlamat, desa)); setSuggestionDesa([]); }}
+                    onTouchStart={() => { setNilaiAlamat(terapkanPilihDesa(nilaiAlamat, desa)); setSuggestionDesa([]); }}
+                    className="px-4 py-3 text-base text-gray-700 hover:bg-batik-50 active:bg-batik-100
+                      cursor-pointer border-b border-gray-100 last:border-0 flex items-center gap-2">
+                    <span className="text-batik-400">📍</span> {desa}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {sukses && (
@@ -302,7 +351,7 @@ useEffect(() => {
                   </div>
                 </div>
 
-                {/* Panel edit */}
+                {/* Panel edit — ada field catatan */}
                 {editId === u.id && (
                   <div className="mt-4 pt-4 border-t border-purple-100 space-y-3">
                     <p className="text-sm font-bold text-purple-700">✏️ Edit Undangan</p>
@@ -310,20 +359,46 @@ useEffect(() => {
                       <label className="block text-sm font-semibold text-gray-600 mb-1">Nama</label>
                       <input value={edit.nama ?? ""}
                         onChange={(e) => setEdit((p) => ({ ...p, nama: e.target.value }))}
-                        className="input-field" />
+                        className="input-field" autoComplete="off" />
                     </div>
-                    <div>
+
+                    {/* Alamat edit + autocomplete */}
+                    <div className="relative">
                       <label className="block text-sm font-semibold text-gray-600 mb-1">Alamat</label>
-                      <input value={edit.alamat ?? ""}
-                        onChange={(e) => setEdit((p) => ({ ...p, alamat: e.target.value }))}
-                        className="input-field" />
+                      <input
+                        value={edit.alamat ?? ""}
+                        onChange={(e) => {
+                          setEdit((p) => ({ ...p, alamat: e.target.value }));
+                          setSuggestionDesaEdit(filterDesa(e.target.value));
+                        }}
+                        onBlur={() => setTimeout(() => setSuggestionDesaEdit([]), 150)}
+                        placeholder="Contoh: Kp3 Bandung, Jaya Bhakti"
+                        autoComplete="off"
+                        className="input-field"
+                      />
+                      {suggestionDesaEdit.length > 0 && (
+                        <ul className="absolute z-10 left-0 right-0 bg-white border-2 border-batik-300 rounded-xl shadow-xl mt-1 overflow-hidden">
+                          {suggestionDesaEdit.map((desa) => (
+                            <li key={desa}
+                              onMouseDown={() => { setEdit((p) => ({ ...p, alamat: terapkanPilihDesa(p.alamat ?? "", desa) })); setSuggestionDesaEdit([]); }}
+                              onTouchStart={() => { setEdit((p) => ({ ...p, alamat: terapkanPilihDesa(p.alamat ?? "", desa) })); setSuggestionDesaEdit([]); }}
+                              className="px-4 py-3 text-base text-gray-700 hover:bg-batik-50 active:bg-batik-100
+                                cursor-pointer border-b border-gray-100 last:border-0 flex items-center gap-2">
+                              <span className="text-batik-400">📍</span> {desa}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
+
+                    {/* Catatan hanya di edit */}
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-1">Catatan</label>
                       <input value={edit.catatan ?? ""}
                         onChange={(e) => setEdit((p) => ({ ...p, catatan: e.target.value }))}
                         placeholder="Catatan tambahan..." className="input-field" />
                     </div>
+
                     <div className="flex gap-2">
                       <button onClick={() => handleSimpanEdit(u.id)}
                         className="btn-primary flex-1 py-3 text-base">💾 Simpan</button>
@@ -337,6 +412,15 @@ useEffect(() => {
           </div>
         )}
       </section>
+
+      {/* Pesan sukses edit */}
+      {suksesEdit && (
+        <div className="fixed bottom-6 left-4 right-4 z-50
+          bg-green-600 text-white font-semibold text-center
+          py-4 px-6 rounded-2xl shadow-xl animate-bounce">
+          {suksesEdit}
+        </div>
+      )}
     </div>
   );
 }

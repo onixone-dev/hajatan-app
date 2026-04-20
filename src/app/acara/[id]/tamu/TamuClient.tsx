@@ -51,6 +51,7 @@ export default function TamuClient({ acara, sumbanganAwal, statistikAwal, daftar
   const [nilaiNama, setNilaiNama] = useState("");
   const [suggestionNama, setSuggestionNama] = useState<Undangan[]>([]);
   const [loadingEdit, setLoadingEdit] = useState(false);
+  const [suksesEdit, setSuksesEdit] = useState("");
   const [menghapus, setMenghapus] = useState<string | null>(null);
 
   function hitungStatistik(list: Sumbangan[]): StatistikAcara {
@@ -87,6 +88,53 @@ export default function TamuClient({ acara, sumbanganAwal, statistikAwal, daftar
     return (parseInt(formatted.replace(/\./g, "")) || 0) * 1000;
   }
 
+  async function sinkronStatusUndangan(
+  namaBaru: string,
+  alamatBaru: string,
+  namaLama?: string,
+  alamatLama?: string
+  ) 
+  {
+  // ── Cek undangan yang cocok dengan data BARU ──
+  const cocokBaru = daftarUndangan.find((u) => {
+    const namaCocok = u.nama.toLowerCase() === namaBaru.toLowerCase();
+    if (u.alamat && alamatBaru) {
+      return namaCocok && u.alamat.toLowerCase() === alamatBaru.toLowerCase();
+    }
+    return namaCocok;
+  });
+
+  // ── Cek undangan yang cocok dengan data LAMA ──
+  const cocokLama = namaLama
+    ? daftarUndangan.find((u) => {
+        const namaCocok = u.nama.toLowerCase() === namaLama.toLowerCase();
+        if (u.alamat && alamatLama) {
+          return namaCocok && u.alamat.toLowerCase() === alamatLama.toLowerCase();
+        }
+        return namaCocok;
+      })
+    : undefined;
+
+  // Kalau data lama cocok dengan undangan tapi data baru tidak cocok
+  // → kembalikan status undangan lama ke "belum"
+  if (cocokLama && (!cocokBaru || cocokLama.id !== cocokBaru?.id)) {
+    await supabase
+      .from("undangan")
+      .update({ status: "belum" })
+      .eq("id", cocokLama.id);
+  }
+
+  // Kalau data baru cocok dengan undangan → update ke "hadir"
+  if (cocokBaru) {
+    await supabase
+      .from("undangan")
+      .update({ status: "hadir" })
+      .eq("id", cocokBaru.id);
+  }
+
+  return cocokBaru;
+}
+
   function cariNama(teks: string) {
   if (teks.trim() === "") { setSuggestionNama([]); return; }
   const kata = teks.toLowerCase();
@@ -120,18 +168,33 @@ function pilihNama(u: Undangan) {
 
   try {
     const { data: baru, error: sbError } = await supabase
-      .from("sumbangan").insert(formData).select().single();
+    .from("sumbangan").insert(formData).select().single();
     if (sbError) throw sbError;
 
     const listBaru = [baru, ...daftarSumbangan];
     setDaftarSumbangan(listBaru);
     setStatistik(hitungStatistik(listBaru));
 
+    // Simpan nilai sebelum direset
+    const alamatTamu = nilaiAlamat.trim();
+
+    // ── Reset form ──
+    formEl.reset();
+    setNilaiNama("");
+    setNilaiAlamat("");
+    setNilaiUang("");
+    setSuggestionNama([]);
+    setSuggestionDesa([]);
+
     // ── Sinkron status undangan ──
-    // Cari undangan yang namanya cocok (case insensitive)
-    const undanganCocok = daftarUndangan.find(
-      (u) => u.nama.toLowerCase() === namaTamu.toLowerCase()
-    );
+    const undanganCocok = daftarUndangan.find((u) => {
+      const namaCocok = u.nama.toLowerCase() === namaTamu.toLowerCase();
+      if (u.alamat && nilaiAlamat.trim()) {
+        return namaCocok &&
+          u.alamat.toLowerCase() === nilaiAlamat.trim().toLowerCase();
+      }
+      return namaCocok;
+    });
 
     if (undanganCocok) {
       await supabase
@@ -140,25 +203,21 @@ function pilihNama(u: Undangan) {
         .eq("id", undanganCocok.id);
     }
 
-    formEl.reset();
-    setNilaiNama("");
-    setNilaiAlamat("");
-    setNilaiUang("");
-    setSuggestionNama([]);
-    setSuggestionDesa([]);
+    // Sinkron — tambah baru tidak ada data lama
+    const cocok = await sinkronStatusUndangan(namaTamu, alamatTamu);
 
     setSukses(
       undanganCocok
         ? `✅ ${namaTamu} dicatat & status undangan diperbarui jadi Hadir!`
         : `✅ ${namaTamu} berhasil dicatat!`
     );
-    setTimeout(() => setSukses(""), 3000);
-  } catch (err: any) {
-    setError(`Gagal menyimpan: ${err.message}`);
-  } finally {
-    setLoading(false);
+  setTimeout(() => setSukses(""), 3000);
+    } catch (err: any) {
+      setError(`Gagal menyimpan: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   }
-}
 
   function bukaEdit(s: Sumbangan) {
     setEditId(s.id);
@@ -182,28 +241,55 @@ function pilihNama(u: Undangan) {
     try {
       const payloadDB = {
         nama_tamu: edit.nama_tamu.trim(),
-        alamat: edit.alamat.trim() || null,
+        alamat:    edit.alamat.trim() || null,
         jumlah_uang: uangKeRupiah(edit.nilaiUang),
-        catatan: edit.catatan.trim() || null,
-        barang: null,
+        catatan:   edit.catatan.trim() || null,
+        barang:    null,
       };
 
       const payloadLokal: Partial<Sumbangan> = {
         nama_tamu: edit.nama_tamu.trim(),
-        alamat: edit.alamat.trim() || undefined,
+        alamat:    edit.alamat.trim() || undefined,
         jumlah_uang: uangKeRupiah(edit.nilaiUang),
-        catatan: edit.catatan.trim() || undefined,
-        barang: undefined,
+        catatan:   edit.catatan.trim() || undefined,
+        barang:    undefined,
       };
 
       const { error } = await supabase.from("sumbangan").update(payloadDB).eq("id", id);
       if (error) throw error;
+
+      // Ambil data lama sebelum diupdate di state
+      const tamuLama = daftarSumbangan.find((s) => s.id === id);
 
       const listBaru = daftarSumbangan.map((s) =>
         s.id === id ? { ...s, ...payloadLokal } : s
       );
       setDaftarSumbangan(listBaru);
       setStatistik(hitungStatistik(listBaru));
+
+      // Sinkron — bandingkan data lama vs data baru
+      await sinkronStatusUndangan(
+        edit.nama_tamu.trim(),
+        edit.alamat.trim(),
+        tamuLama?.nama_tamu,
+        tamuLama?.alamat,
+      );
+
+      const cocok = await sinkronStatusUndangan(
+        edit.nama_tamu.trim(),
+        edit.alamat.trim(),
+        tamuLama?.nama_tamu,
+        tamuLama?.alamat,
+      );
+
+      tutupEdit();
+      setSuksesEdit(
+        cocok
+          ? `✅ Data diperbarui & status undangan ${cocok.nama} diperbarui!`
+          : `✅ Data ${edit.nama_tamu.trim()} berhasil diperbarui!`
+      );
+      setTimeout(() => setSuksesEdit(""), 3000);
+
       tutupEdit();
     } catch (err: any) {
       alert(`Gagal menyimpan: ${err.message}`);
@@ -460,6 +546,15 @@ function pilihNama(u: Undangan) {
           </div>
         )}
       </section>
+
+      {/* Pesan sukses edit */}
+      {suksesEdit && (
+        <div className="fixed bottom-6 left-4 right-4 z-50
+          bg-green-600 text-white font-semibold text-center
+          py-4 px-6 rounded-2xl shadow-xl animate-bounce">
+          {suksesEdit}
+        </div>
+      )}
 
       {/* Export */}
       {daftarSumbangan.length > 0 && (
