@@ -13,6 +13,7 @@ interface Sewa {
   nama_barang: string;
   vendor?: string;
   jumlah: number;
+  lunas: number;
   satuan: string;
   harga: number;
   dp: number;
@@ -30,7 +31,7 @@ interface StateEdit {
   satuan: string;
   nilaiHarga: string;
   nilaiDp: string;
-  status: Sewa["status"];
+  nilaiLunas: string;
   tanggal_ambil: string;
   tanggal_kembali: string;
   catatan: string;
@@ -63,15 +64,16 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
   const [suksesEdit, setSuksesEdit] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [edit, setEdit] = useState<StateEdit>({
-    nama_barang: "", vendor: "", jumlah: "1", satuan: "unit",
-    nilaiHarga: "", nilaiDp: "", status: "belum_lunas",
-    tanggal_ambil: "", tanggal_kembali: "", catatan: "",
-  });
+  nama_barang: "", vendor: "", jumlah: "1", satuan: "unit",
+  nilaiHarga: "", nilaiDp: "", nilaiLunas: "",
+  tanggal_ambil: "", tanggal_kembali: "", catatan: "",
+});
   const [menghapus, setMenghapus] = useState<string | null>(null);
 
   // State form tambah
   const [nilaiHarga, setNilaiHarga] = useState("");
   const [nilaiDp, setNilaiDp] = useState("");
+  const [nilaiLunas, setNilaiLunas] = useState("");
   const [suggestionBarang, setSuggestionBarang] = useState<string[]>([]);
 
   // ── Statistik ──
@@ -91,6 +93,12 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
     return parseInt(formatted.replace(/\./g, "")) || 0;
   }
 
+  function hitungStatus(dp: number, lunas: number): Sewa["status"] {
+  if (lunas > 0) return "lunas";
+  if (dp > 0) return "dp_dibayar";
+  return "belum_lunas";
+}
+
   function cariBarang(teks: string) {
     if (teks.trim() === "") { setSuggestionBarang([]); return; }
     const cocok = CONTOH_BARANG.filter((b) =>
@@ -106,6 +114,8 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
 
     const formEl = e.currentTarget;
     const data = new FormData(formEl);
+    const dpVal    = uangKeAngka(nilaiDp);
+    const lunasVal = uangKeAngka(nilaiLunas);
 
     const payload = {
       acara_id:       acara.id,
@@ -114,8 +124,9 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
       jumlah:         parseInt(data.get("jumlah") as string) || 1,
       satuan:         data.get("satuan") as string,
       harga:          uangKeAngka(nilaiHarga),
-      dp:             uangKeAngka(nilaiDp),
-      status:         "belum_lunas" as const,
+      dp:     dpVal,
+      lunas:  lunasVal,
+      status: hitungStatus(dpVal, lunasVal),
       tanggal_ambil:  (data.get("tanggal_ambil") as string) || null,
       tanggal_kembali:(data.get("tanggal_kembali") as string) || null,
       catatan:        (data.get("catatan") as string).trim() || null,
@@ -130,6 +141,7 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
       formEl.reset();
       setNilaiHarga("");
       setNilaiDp("");
+      setNilaiLunas("");
       setSuggestionBarang([]);
       setSukses(`✅ ${payload.nama_barang} berhasil ditambahkan!`);
       setTimeout(() => setSukses(""), 2000);
@@ -154,33 +166,37 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
 
   // ── Buka edit ──
   function bukaEdit(s: Sewa) {
-    setEditId(s.id);
-    setEdit({
-      nama_barang:    s.nama_barang,
-      vendor:         s.vendor ?? "",
-      jumlah:         s.jumlah.toString(),
-      satuan:         s.satuan,
-      nilaiHarga:     s.harga > 0 ? s.harga.toLocaleString("id-ID") : "",
-      nilaiDp:        s.dp > 0 ? s.dp.toLocaleString("id-ID") : "",
-      status:         s.status,
-      tanggal_ambil:  s.tanggal_ambil ?? "",
-      tanggal_kembali:s.tanggal_kembali ?? "",
-      catatan:        s.catatan ?? "",
-    });
-  }
-
+  setEditId(s.id);
+  setEdit({
+    nama_barang:     s.nama_barang,
+    vendor:          s.vendor ?? "",
+    jumlah:          s.jumlah.toString(),
+    satuan:          s.satuan,
+    nilaiHarga:      s.harga > 0 ? s.harga.toLocaleString("id-ID") : "",
+    nilaiDp:         s.dp > 0 ? s.dp.toLocaleString("id-ID") : "",
+    nilaiLunas:      s.lunas > 0 ? s.lunas.toLocaleString("id-ID") : "",
+    tanggal_ambil:   s.tanggal_ambil ?? "",
+    tanggal_kembali: s.tanggal_kembali ?? "",
+    catatan:         s.catatan ?? "",
+  });
+}
   // ── Simpan edit ──
   async function handleSimpanEdit(id: string) {
     if (!edit.nama_barang.trim()) { alert("Nama barang tidak boleh kosong."); return; }
     try {
+
+      const dpVal    = uangKeAngka(edit.nilaiDp);
+      const lunasVal = uangKeAngka(edit.nilaiLunas);
+
       const payloadDB = {
         nama_barang:    edit.nama_barang.trim(),
         vendor:         edit.vendor.trim() || null,
         jumlah:         parseInt(edit.jumlah) || 1,
         satuan:         edit.satuan,
         harga:          uangKeAngka(edit.nilaiHarga),
-        dp:             uangKeAngka(edit.nilaiDp),
-        status:         edit.status,
+        dp:     dpVal,
+        lunas:  lunasVal,
+        status: hitungStatus(dpVal, lunasVal),
         tanggal_ambil:  edit.tanggal_ambil || null,
         tanggal_kembali:edit.tanggal_kembali || null,
         catatan:        edit.catatan.trim() || null,
@@ -318,20 +334,54 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
             )}
           </div>
 
-          {/* DP */}
-          <div>
-            <label className="block text-base font-semibold text-gray-700 mb-1">
-              DP <span className="text-gray-400 text-sm font-normal">(opsional)</span>
-            </label>
-            <input value={nilaiDp}
-              onChange={(e) => setNilaiDp(formatUang(e.target.value))}
-              placeholder="Contoh: 200.000"
-              className="input-field" inputMode="numeric" autoComplete="off" />
-            {nilaiDp !== "" && (
-              <p className="text-sm text-batik-600 font-semibold mt-1">
-                = {formatRupiah(uangKeAngka(nilaiDp))}
-              </p>
-            )}
+          {/* DP & Lunas dalam 1 baris */}
+          <div className="bg-gray-50 rounded-xl p-3 space-y-3 border border-gray-200">
+            <p className="text-sm font-bold text-gray-600">💳 Pembayaran</p>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-600 mb-1">
+                DP <span className="text-gray-400 font-normal">(opsional)</span>
+              </label>
+              <input value={nilaiDp}
+                onChange={(e) => setNilaiDp(formatUang(e.target.value))}
+                placeholder="Kosongkan jika belum bayar DP"
+                className="input-field" inputMode="numeric" autoComplete="off" />
+              {nilaiDp !== "" && (
+                <p className="text-sm text-yellow-600 font-semibold mt-1">
+                  = {formatRupiah(uangKeAngka(nilaiDp))}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-600 mb-1">
+                Pelunasan <span className="text-gray-400 font-normal">(opsional)</span>
+              </label>
+              <input value={nilaiLunas}
+                onChange={(e) => setNilaiLunas(formatUang(e.target.value))}
+                placeholder="Kosongkan jika belum lunas"
+                className="input-field" inputMode="numeric" autoComplete="off" />
+              {nilaiLunas !== "" && (
+                <p className="text-sm text-green-600 font-semibold mt-1">
+                  = {formatRupiah(uangKeAngka(nilaiLunas))}
+                </p>
+              )}
+            </div>
+
+            {/* Preview status otomatis */}
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-sm text-gray-500">Status otomatis:</span>
+              <span className={`text-xs font-bold px-3 py-1 rounded-full border-2
+                ${hitungStatus(uangKeAngka(nilaiDp), uangKeAngka(nilaiLunas)) === "lunas"
+                  ? STATUS_LABEL.lunas.warna
+                  : hitungStatus(uangKeAngka(nilaiDp), uangKeAngka(nilaiLunas)) === "dp_dibayar"
+                  ? STATUS_LABEL.dp_dibayar.warna
+                  : STATUS_LABEL.belum_lunas.warna
+                }`}>
+                {STATUS_LABEL[hitungStatus(uangKeAngka(nilaiDp), uangKeAngka(nilaiLunas))].icon}{" "}
+                {STATUS_LABEL[hitungStatus(uangKeAngka(nilaiDp), uangKeAngka(nilaiLunas))].label}
+              </span>
+            </div>
           </div>
 
           {/* Tanggal ambil & kembali */}
@@ -421,19 +471,12 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
                       <p className="text-gray-400 text-sm italic">"{s.catatan}"</p>
                     )}
 
-                    {/* Tombol status */}
-                    <div className="flex gap-2 mt-2 flex-wrap">
-                      {(["belum_lunas", "dp_dibayar", "lunas"] as const).map((st) => (
-                        <button key={st}
-                          onClick={() => handleStatusChange(s.id, st)}
-                          className={`text-xs font-bold px-3 py-1 rounded-full border-2 transition-all
-                            ${s.status === st
-                              ? STATUS_LABEL[st].warna + " scale-105"
-                              : "bg-white text-gray-400 border-gray-200 hover:border-gray-300"
-                            }`}>
-                          {STATUS_LABEL[st].icon} {STATUS_LABEL[st].label}
-                        </button>
-                      ))}
+                    {/* Ganti tombol status dengan badge saja */}
+                    <div className="mt-2">
+                      <span className={`text-xs font-bold px-3 py-1 rounded-full border-2
+                        ${STATUS_LABEL[s.status].warna}`}>
+                        {STATUS_LABEL[s.status].icon} {STATUS_LABEL[s.status].label}
+                      </span>
                     </div>
                   </div>
 
@@ -512,15 +555,39 @@ export default function SewaClient({ acara, sewaAwal }: Props) {
                       )}
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-1">Status</label>
-                      <select value={edit.status}
-                        onChange={(e) => setEdit((p) => ({ ...p, status: e.target.value as Sewa["status"] }))}
-                        className="input-field bg-white">
-                        <option value="belum_lunas">🔴 Belum Lunas</option>
-                        <option value="dp_dibayar">🟡 DP Dibayar</option>
-                        <option value="lunas">🟢 Lunas</option>
-                      </select>
+                    {/* Ganti field status di panel edit dengan ini: */}
+                    <div className="bg-gray-50 rounded-xl p-3 space-y-3 border border-gray-200">
+                      <p className="text-sm font-bold text-gray-600">💳 Pembayaran</p>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-1">DP</label>
+                        <input value={edit.nilaiDp}
+                          onChange={(e) => setEdit((p) => ({ ...p, nilaiDp: formatUang(e.target.value) }))}
+                          className="input-field" inputMode="numeric" />
+                        {edit.nilaiDp !== "" && (
+                          <p className="text-sm text-yellow-600 font-semibold mt-1">
+                            = {formatRupiah(uangKeAngka(edit.nilaiDp))}
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-1">Pelunasan</label>
+                        <input value={edit.nilaiLunas}
+                          onChange={(e) => setEdit((p) => ({ ...p, nilaiLunas: formatUang(e.target.value) }))}
+                          className="input-field" inputMode="numeric" />
+                        {edit.nilaiLunas !== "" && (
+                          <p className="text-sm text-green-600 font-semibold mt-1">
+                            = {formatRupiah(uangKeAngka(edit.nilaiLunas))}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="text-sm text-gray-500">Status otomatis:</span>
+                        <span className={`text-xs font-bold px-3 py-1 rounded-full border-2
+                          ${STATUS_LABEL[hitungStatus(uangKeAngka(edit.nilaiDp), uangKeAngka(edit.nilaiLunas))].warna}`}>
+                          {STATUS_LABEL[hitungStatus(uangKeAngka(edit.nilaiDp), uangKeAngka(edit.nilaiLunas))].icon}{" "}
+                          {STATUS_LABEL[hitungStatus(uangKeAngka(edit.nilaiDp), uangKeAngka(edit.nilaiLunas))].label}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex gap-3">
