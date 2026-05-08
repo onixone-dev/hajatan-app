@@ -13,6 +13,8 @@ interface Biaya {
   nama_biaya: string;
   kategori: string;
   jumlah: number;
+  satuan: string;
+  harga_satuan: number;
   sudah_bayar: number;
   catatan?: string;
   created_at: string;
@@ -21,7 +23,9 @@ interface Biaya {
 interface StateEdit {
   nama_biaya: string;
   kategori: string;
-  nilaiJumlah: string;
+  jumlah: string;
+  satuan: string;
+  nilaiHargaSatuan: string;
   nilaiSudahBayar: string;
   catatan: string;
 }
@@ -32,15 +36,28 @@ interface Props {
 }
 
 const KATEGORI_LIST = [
-  { id: "konsumsi",    label: "🍽️ Konsumsi"    },
-  { id: "dekorasi",    label: "🌸 Dekorasi"     },
-  { id: "dokumentasi", label: "📸 Dokumentasi"  },
-  { id: "hiburan",     label: "🎵 Hiburan"      },
-  { id: "transport",   label: "🚗 Transport"    },
-  { id: "pakaian",     label: "👗 Pakaian"      },
-  { id: "administrasi",label: "📋 Administrasi" },
-  { id: "lainnya",     label: "📦 Lainnya"      },
+  { id: "konsumsi",     label: "🍽️ Konsumsi"     },
+  { id: "sembako",      label: "🛒 Sembako"       },
+  { id: "dekorasi",     label: "🌸 Dekorasi"      },
+  { id: "dokumentasi",  label: "📸 Dokumentasi"   },
+  { id: "hiburan",      label: "🎵 Hiburan"       },
+  { id: "transport",    label: "🚗 Transport"     },
+  { id: "pakaian",      label: "👗 Pakaian"       },
+  { id: "administrasi", label: "📋 Administrasi"  },
+  { id: "lainnya",      label: "📦 Lainnya"       },
 ];
+
+const SATUAN_PER_KATEGORI: Record<string, string[]> = {
+  konsumsi:     ["porsi", "pax", "kotak", "kg", "liter", "paket"],
+  sembako:      ["kg", "liter", "buah", "paket", "lusin", "kotak", "dus", "karung"],
+  dekorasi:     ["paket", "unit", "set", "meter", "buah"],
+  dokumentasi:  ["paket", "jam", "hari", "unit"],
+  hiburan:      ["paket", "jam", "malam", "hari"],
+  transport:    ["liter", "km", "hari", "unit", "kali"],
+  pakaian:      ["stel", "buah", "pasang", "paket"],
+  administrasi: ["lembar", "buah", "paket", "kotak"],
+  lainnya:      ["unit", "paket", "buah", "set", "kali"],
+};
 
 export default function BiayaClient({ acara, biayaAwal }: Props) {
   const [list, setList] = useState<Biaya[]>(biayaAwal);
@@ -50,20 +67,27 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
   const [suksesEdit, setSuksesEdit] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [menghapus, setMenghapus] = useState<string | null>(null);
+  const [filterKategori, setFilterKategori] = useState("semua");
   const [edit, setEdit] = useState<StateEdit>({
-    nama_biaya: "", kategori: "lainnya",
-    nilaiJumlah: "", nilaiSudahBayar: "", catatan: "",
+    nama_biaya: "", kategori: "lainnya", jumlah: "1",
+    satuan: "unit", nilaiHargaSatuan: "", nilaiSudahBayar: "", catatan: "",
   });
 
   // State form tambah
-  const [nilaiJumlah, setNilaiJumlah] = useState("");
+  const [kategoriTambah, setKategoriTambah] = useState("lainnya");
+  const [nilaiHargaSatuan, setNilaiHargaSatuan] = useState("");
   const [nilaiSudahBayar, setNilaiSudahBayar] = useState("");
+  const [jumlahTambah, setJumlahTambah] = useState(1);
 
   // ── Statistik ──
-  const totalBiaya     = list.reduce((s, b) => s + b.jumlah, 0);
+  const totalBiaya      = list.reduce((s, b) => s + (b.harga_satuan * b.jumlah), 0);
   const totalSudahBayar = list.reduce((s, b) => s + b.sudah_bayar, 0);
-  const totalSisa      = totalBiaya - totalSudahBayar;
-  const totalItem      = list.length;
+  const totalSisa       = totalBiaya - totalSudahBayar;
+
+  // ── Filter ──
+  const listTerfilter = filterKategori === "semua"
+    ? list
+    : list.filter((b) => b.kategori === filterKategori);
 
   // ── Helpers ──
   function formatUang(raw: string): string {
@@ -76,14 +100,22 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
     return parseInt(formatted.replace(/\./g, "")) || 0;
   }
 
-  function hitungStatusBayar(jumlah: number, sudahBayar: number) {
-    if (sudahBayar <= 0) return { label: "Belum Bayar", warna: "bg-red-100 text-red-700 border-red-300", icon: "🔴" };
-    if (sudahBayar >= jumlah) return { label: "Lunas", warna: "bg-green-100 text-green-700 border-green-300", icon: "🟢" };
-    return { label: "Sebagian", warna: "bg-yellow-100 text-yellow-700 border-yellow-300", icon: "🟡" };
+  function hitungTotal(hargaSatuan: number, jumlah: number): number {
+    return hargaSatuan * jumlah;
+  }
+
+  function hitungStatusBayar(total: number, sudahBayar: number) {
+    if (sudahBayar <= 0)      return { label: "Belum Bayar", warna: "bg-red-100 text-red-700 border-red-300",    icon: "🔴" };
+    if (sudahBayar >= total)  return { label: "Lunas",       warna: "bg-green-100 text-green-700 border-green-300", icon: "🟢" };
+    return                           { label: "Sebagian",    warna: "bg-yellow-100 text-yellow-700 border-yellow-300", icon: "🟡" };
   }
 
   function labelKategori(id: string): string {
     return KATEGORI_LIST.find((k) => k.id === id)?.label ?? "📦 Lainnya";
+  }
+
+  function satuanList(kategori: string): string[] {
+    return SATUAN_PER_KATEGORI[kategori] ?? SATUAN_PER_KATEGORI.lainnya;
   }
 
   // ── Tambah ──
@@ -93,15 +125,19 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
 
     const formEl = e.currentTarget;
     const data = new FormData(formEl);
-    const namaBiaya = (data.get("nama_biaya") as string).trim();
+    const namaBiaya  = (data.get("nama_biaya") as string).trim();
+    const jumlahVal  = parseInt(data.get("jumlah") as string) || 1;
+    const hargaVal   = uangKeAngka(nilaiHargaSatuan);
 
     const payload = {
-      acara_id:    acara.id,
-      nama_biaya:  namaBiaya,
-      kategori:    data.get("kategori") as string,
-      jumlah:      uangKeAngka(nilaiJumlah),
-      sudah_bayar: uangKeAngka(nilaiSudahBayar),
-      catatan:     (data.get("catatan") as string).trim() || null,
+      acara_id:     acara.id,
+      nama_biaya:   namaBiaya,
+      kategori:     kategoriTambah,
+      jumlah:       jumlahVal,
+      satuan:       data.get("satuan") as string,
+      harga_satuan: hargaVal,
+      sudah_bayar:  uangKeAngka(nilaiSudahBayar),
+      catatan:      (data.get("catatan") as string).trim() || null,
     };
 
     try {
@@ -111,8 +147,10 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
 
       setList([baru, ...list]);
       formEl.reset();
-      setNilaiJumlah("");
+      setKategoriTambah("lainnya");
+      setNilaiHargaSatuan("");
       setNilaiSudahBayar("");
+      setJumlahTambah(1);
       setSukses(`✅ ${namaBiaya} berhasil ditambahkan!`);
       setTimeout(() => setSukses(""), 2000);
     } catch (err: any) {
@@ -126,11 +164,13 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
   function bukaEdit(b: Biaya) {
     setEditId(b.id);
     setEdit({
-      nama_biaya:      b.nama_biaya,
-      kategori:        b.kategori,
-      nilaiJumlah:     b.jumlah > 0 ? b.jumlah.toLocaleString("id-ID") : "",
-      nilaiSudahBayar: b.sudah_bayar > 0 ? b.sudah_bayar.toLocaleString("id-ID") : "",
-      catatan:         b.catatan ?? "",
+      nama_biaya:       b.nama_biaya,
+      kategori:         b.kategori,
+      jumlah:           b.jumlah.toString(),
+      satuan:           b.satuan,
+      nilaiHargaSatuan: b.harga_satuan > 0 ? b.harga_satuan.toLocaleString("id-ID") : "",
+      nilaiSudahBayar:  b.sudah_bayar > 0 ? b.sudah_bayar.toLocaleString("id-ID") : "",
+      catatan:          b.catatan ?? "",
     });
   }
 
@@ -138,20 +178,23 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
   async function handleSimpanEdit(id: string) {
     if (!edit.nama_biaya.trim()) { alert("Nama biaya tidak boleh kosong."); return; }
     try {
+      const jumlahVal = parseInt(edit.jumlah) || 1;
+      const hargaVal  = uangKeAngka(edit.nilaiHargaSatuan);
+
       const payload = {
-        nama_biaya:  edit.nama_biaya.trim(),
-        kategori:    edit.kategori,
-        jumlah:      uangKeAngka(edit.nilaiJumlah),
-        sudah_bayar: uangKeAngka(edit.nilaiSudahBayar),
-        catatan:     edit.catatan.trim() || null,
+        nama_biaya:   edit.nama_biaya.trim(),
+        kategori:     edit.kategori,
+        jumlah:       jumlahVal,
+        satuan:       edit.satuan,
+        harga_satuan: hargaVal,
+        sudah_bayar:  uangKeAngka(edit.nilaiSudahBayar),
+        catatan:      edit.catatan.trim() || null,
       };
 
       const { error } = await supabase.from("biaya").update(payload).eq("id", id);
       if (error) throw error;
 
-      setList((prev) => prev.map((b) =>
-        b.id === id ? { ...b, ...payload } : b
-      ));
+      setList((prev) => prev.map((b) => b.id === id ? { ...b, ...payload } as Biaya : b));
       setEditId(null);
       setSuksesEdit(`✅ ${edit.nama_biaya} berhasil diperbarui!`);
       setTimeout(() => setSuksesEdit(""), 3000);
@@ -195,10 +238,10 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
 
       {/* Statistik */}
       <div className="grid grid-cols-2 gap-3">
-        <KartuStatistik label="Total Biaya" nilai={formatRupiah(totalBiaya)} ikon="💸" kecil />
-        <KartuStatistik label="Sisa Bayar" nilai={formatRupiah(totalSisa)} ikon="🔴" kecil />
-        <KartuStatistik label="Sudah Bayar" nilai={formatRupiah(totalSudahBayar)} ikon="🟢" kecil />
-        <KartuStatistik label="Total Item" nilai={totalItem.toString()} ikon="📋" />
+        <KartuStatistik label="Total Biaya"   nilai={formatRupiah(totalBiaya)}      ikon="💸" kecil />
+        <KartuStatistik label="Sisa Bayar"    nilai={formatRupiah(totalSisa)}        ikon="🔴" kecil />
+        <KartuStatistik label="Sudah Bayar"   nilai={formatRupiah(totalSudahBayar)}  ikon="🟢" kecil />
+        <KartuStatistik label="Total Item"    nilai={list.length.toString()}         ikon="📋" />
       </div>
 
       {/* Form tambah */}
@@ -210,52 +253,76 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
               Nama Biaya <span className="text-red-500">*</span>
             </label>
             <input name="nama_biaya" required
-              placeholder="Contoh: Catering, Dekorasi Bunga..."
+              placeholder="Contoh: Catering, Bensin, Cetak Undangan..."
               className="input-field" autoComplete="off" />
           </div>
 
+          {/* Kategori */}
           <div>
             <label className="block text-base font-semibold text-gray-700 mb-1">Kategori</label>
-            <select name="kategori" className="input-field bg-white">
+            <select name="kategori" value={kategoriTambah}
+              onChange={(e) => setKategoriTambah(e.target.value)}
+              className="input-field bg-white">
               {KATEGORI_LIST.map((k) => (
                 <option key={k.id} value={k.id}>{k.label}</option>
               ))}
             </select>
           </div>
 
+          {/* Jumlah & Satuan */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-base font-semibold text-gray-700 mb-1">Jumlah</label>
+              <input name="jumlah" type="number" min="1" value={jumlahTambah}
+                onChange={(e) => setJumlahTambah(parseInt(e.target.value) || 1)}
+                className="input-field" inputMode="numeric" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-base font-semibold text-gray-700 mb-1">Satuan</label>
+              <select name="satuan" className="input-field bg-white">
+                {satuanList(kategoriTambah).map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Harga satuan */}
           <div>
             <label className="block text-base font-semibold text-gray-700 mb-1">
-              Total Biaya (Rp)
+              Harga Satuan (Rp)
             </label>
-            <input value={nilaiJumlah}
-              onChange={(e) => setNilaiJumlah(formatUang(e.target.value))}
-              placeholder="Contoh: 5.000.000"
+            <input value={nilaiHargaSatuan}
+              onChange={(e) => setNilaiHargaSatuan(formatUang(e.target.value))}
+              placeholder="Contoh: 50.000"
               className="input-field" inputMode="numeric" autoComplete="off" />
-            {nilaiJumlah !== "" && (
-              <p className="text-sm text-batik-600 font-semibold mt-1">
-                = {formatRupiah(uangKeAngka(nilaiJumlah))}
-              </p>
+            {nilaiHargaSatuan !== "" && (
+              <div className="mt-1 space-y-0.5">
+                {jumlahTambah > 1 && (
+                  <p className="text-sm text-batik-600  font-semibold">
+                   = {formatRupiah(uangKeAngka(nilaiHargaSatuan))} × {jumlahTambah} ={" "}
+                    <span className="font-bold text-batik-700">
+                      {formatRupiah(uangKeAngka(nilaiHargaSatuan) * jumlahTambah)}
+                    </span>
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
           {/* Sudah bayar */}
           <div className="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
-            <p className="text-sm font-bold text-gray-600">💳 Sudah Dibayar</p>
+            <p className="text-sm font-bold text-gray-600">💳 Pembayaran</p>
             <input value={nilaiSudahBayar}
               onChange={(e) => setNilaiSudahBayar(formatUang(e.target.value))}
               placeholder="Kosongkan jika belum bayar"
               className="input-field" inputMode="numeric" autoComplete="off" />
-            {nilaiSudahBayar !== "" && (
-              <p className="text-sm font-semibold mt-1">
-                = {formatRupiah(uangKeAngka(nilaiSudahBayar))}
-              </p>
-            )}
-
-            {/* Preview status */}
             <div className="flex items-center gap-2 pt-1">
               <span className="text-sm text-gray-500">Status:</span>
               {(() => {
-                const st = hitungStatusBayar(uangKeAngka(nilaiJumlah), uangKeAngka(nilaiSudahBayar));
+                // Pakai total (harga × jumlah) bukan harga satuan saja
+                const total = uangKeAngka(nilaiHargaSatuan) * jumlahTambah;
+                const st = hitungStatusBayar(total, uangKeAngka(nilaiSudahBayar));
                 return (
                   <span className={`text-xs font-bold px-3 py-1 rounded-full border-2 ${st.warna}`}>
                     {st.icon} {st.label}
@@ -269,8 +336,7 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
             <label className="block text-base font-semibold text-gray-700 mb-1">
               Catatan <span className="text-gray-400 text-sm font-normal">(opsional)</span>
             </label>
-            <input name="catatan" placeholder="Catatan tambahan..."
-              className="input-field" />
+            <input name="catatan" placeholder="Catatan tambahan..." className="input-field" />
           </div>
 
           {sukses && (
@@ -285,28 +351,53 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
         </form>
       </section>
 
+      {/* Filter kategori */}
+      <section>
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          <button
+            onClick={() => setFilterKategori("semua")}
+            className={`flex-shrink-0 text-sm font-bold px-4 py-2 rounded-full border-2 transition-all
+              ${filterKategori === "semua"
+                ? "bg-batik-600 text-white border-batik-600"
+                : "bg-white text-gray-500 border-gray-200"}`}>
+            Semua ({list.length})
+          </button>
+          {KATEGORI_LIST.filter((k) => list.some((b) => b.kategori === k.id)).map((k) => (
+            <button key={k.id}
+              onClick={() => setFilterKategori(k.id)}
+              className={`flex-shrink-0 text-sm font-bold px-4 py-2 rounded-full border-2 transition-all
+                ${filterKategori === k.id
+                  ? "bg-batik-600 text-white border-batik-600"
+                  : "bg-white text-gray-500 border-gray-200"}`}>
+              {k.label} ({list.filter((b) => b.kategori === k.id).length})
+            </button>
+          ))}
+        </div>
+      </section>
+
       {/* Daftar biaya */}
       <section>
         <h3 className="text-xl font-bold text-batik-700 mb-3 flex items-center gap-2">
           <span>📋</span> Daftar Biaya
           <span className="ml-auto text-base font-normal text-gray-500">
-            {list.length} item
+            {listTerfilter.length} item
           </span>
         </h3>
 
-        {list.length === 0 ? (
+        {listTerfilter.length === 0 ? (
           <div className="card text-center py-10 text-gray-400">
             <p className="text-4xl mb-2">💸</p>
             <p className="text-lg">Belum ada catatan biaya.</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {list.map((b) => {
-              const statusBayar = hitungStatusBayar(b.jumlah, b.sudah_bayar);
+            {listTerfilter.map((b) => {
+              const total       = hitungTotal(b.harga_satuan, b.jumlah);
+              const statusBayar = hitungStatusBayar(total, b.sudah_bayar);
               return (
                 <div key={b.id} className="card">
                   <div className="flex items-start gap-3">
-                    <div className="w-12 h-12 rounded-full bg-red-100 text-red-700 font-bold
+                    <div className="w-12 h-12 rounded-full bg-red-100 text-red-700
                       flex items-center justify-center text-2xl flex-shrink-0">
                       💸
                     </div>
@@ -315,29 +406,30 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
                         {b.nama_biaya}
                       </p>
                       <p className="text-gray-400 text-xs">{labelKategori(b.kategori)}</p>
-
-                      {b.jumlah > 0 && (
-                        <p className="text-gray-700 text-sm mt-1">
-                          💰 {formatRupiah(b.jumlah)}
+                      <p className="text-gray-500 text-sm mt-1">
+                        {b.jumlah} {b.satuan}
+                        {b.harga_satuan > 0 && (
+                          <span className="ml-1">× {formatRupiah(b.harga_satuan)}</span>
+                        )}
+                      </p>
+                      {total > 0 && (
+                        <p className="text-gray-700 text-sm font-semibold">
+                          = {formatRupiah(total)}
                           {b.sudah_bayar > 0 && (
-                            <span className="text-green-600 ml-2">
+                            <span className="text-green-600 ml-2 font-normal">
                               · Bayar {formatRupiah(b.sudah_bayar)}
                             </span>
                           )}
                         </p>
                       )}
-
-                      {b.jumlah > 0 && b.sudah_bayar > 0 && b.sudah_bayar < b.jumlah && (
+                      {total > 0 && b.sudah_bayar > 0 && b.sudah_bayar < total && (
                         <p className="text-red-500 text-sm">
-                          Sisa {formatRupiah(b.jumlah - b.sudah_bayar)}
+                          Sisa {formatRupiah(total - b.sudah_bayar)}
                         </p>
                       )}
-
                       {b.catatan && (
                         <p className="text-gray-400 text-sm italic mt-1">"{b.catatan}"</p>
                       )}
-
-                      {/* Badge status */}
                       <div className="mt-2">
                         <span className={`text-xs font-bold px-3 py-1 rounded-full border-2 ${statusBayar.warna}`}>
                           {statusBayar.icon} {statusBayar.label}
@@ -373,7 +465,7 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
                       <div>
                         <label className="block text-sm font-semibold text-gray-600 mb-1">Kategori</label>
                         <select value={edit.kategori}
-                          onChange={(e) => setEdit((p) => ({ ...p, kategori: e.target.value }))}
+                          onChange={(e) => setEdit((p) => ({ ...p, kategori: e.target.value, satuan: satuanList(e.target.value)[0] }))}
                           className="input-field bg-white">
                           {KATEGORI_LIST.map((k) => (
                             <option key={k.id} value={k.id}>{k.label}</option>
@@ -381,20 +473,59 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
                         </select>
                       </div>
 
+                      <div className="flex gap-3">
+                        <div className="flex-1">
+                          <label className="block text-sm font-semibold text-gray-600 mb-1">Jumlah</label>
+                          <input type="number" min="1" value={edit.jumlah}
+                            onChange={(e) => setEdit((p) => ({ ...p, jumlah: e.target.value }))}
+                            className="input-field" inputMode="numeric" />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-sm font-semibold text-gray-600 mb-1">Satuan</label>
+                          <select value={edit.satuan}
+                            onChange={(e) => setEdit((p) => ({ ...p, satuan: e.target.value }))}
+                            className="input-field bg-white">
+                            {satuanList(edit.kategori).map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
                       <div>
-                        <label className="block text-sm font-semibold text-gray-600 mb-1">Total Biaya (Rp)</label>
-                        <input value={edit.nilaiJumlah}
-                          onChange={(e) => setEdit((p) => ({ ...p, nilaiJumlah: formatUang(e.target.value) }))}
+                        <label className="block text-sm font-semibold text-gray-600 mb-1">Harga Satuan (Rp)</label>
+                        <input value={edit.nilaiHargaSatuan}
+                          onChange={(e) => setEdit((p) => ({ ...p, nilaiHargaSatuan: formatUang(e.target.value) }))}
                           className="input-field" inputMode="numeric" />
-                        {edit.nilaiJumlah !== "" && (
-                          <p className="text-sm text-batik-600 font-semibold mt-1">
-                            = {formatRupiah(uangKeAngka(edit.nilaiJumlah))}
-                          </p>
+                        {edit.nilaiHargaSatuan !== "" && (
+                          <div className="mt-1 space-y-0.5">
+                            <p className="text-sm text-batik-600 font-semibold">
+                              = {formatRupiah(uangKeAngka(edit.nilaiHargaSatuan))}
+                            </p>
+                            {parseInt(edit.jumlah) > 1 && (
+                              <p className="text-sm text-gray-500">
+                                {formatRupiah(uangKeAngka(edit.nilaiHargaSatuan))} × {edit.jumlah} ={" "}
+                                <span className="font-bold text-batik-700">
+                                  {formatRupiah(uangKeAngka(edit.nilaiHargaSatuan) * (parseInt(edit.jumlah) || 1))}
+                                </span>
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
 
                       <div className="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
                         <p className="text-sm font-bold text-gray-600">💳 Sudah Dibayar</p>
+                        {edit.nilaiHargaSatuan !== "" && (
+                          <p className="text-xs text-gray-400">
+                            Total tagihan:{" "}
+                            <span className="font-bold text-gray-600">
+                              {formatRupiah(
+                                uangKeAngka(edit.nilaiHargaSatuan) * (parseInt(edit.jumlah) || 1)
+                              )}
+                            </span>
+                          </p>
+                        )}
                         <input value={edit.nilaiSudahBayar}
                           onChange={(e) => setEdit((p) => ({ ...p, nilaiSudahBayar: formatUang(e.target.value) }))}
                           className="input-field" inputMode="numeric" />
@@ -406,10 +537,11 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
                         <div className="flex items-center gap-2 pt-1">
                           <span className="text-sm text-gray-500">Status:</span>
                           {(() => {
-                            const st = hitungStatusBayar(
-                              uangKeAngka(edit.nilaiJumlah),
-                              uangKeAngka(edit.nilaiSudahBayar)
+                            const total = hitungTotal(
+                              uangKeAngka(edit.nilaiHargaSatuan),
+                              parseInt(edit.jumlah) || 1
                             );
+                            const st = hitungStatusBayar(total, uangKeAngka(edit.nilaiSudahBayar));
                             return (
                               <span className={`text-xs font-bold px-3 py-1 rounded-full border-2 ${st.warna}`}>
                                 {st.icon} {st.label}
@@ -441,7 +573,7 @@ export default function BiayaClient({ acara, biayaAwal }: Props) {
         )}
       </section>
 
-      {/* Toast notifikasi edit */}
+      {/* Toast */}
       {suksesEdit && (
         <div className="fixed bottom-6 left-4 right-4 z-50 bg-green-600 text-white
           font-semibold text-center py-4 px-6 rounded-2xl shadow-xl animate-bounce">
